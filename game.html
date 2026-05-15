@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>星際獵人 - 數據保存版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background: #020617; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; touch-action: none; }
+        canvas { display: block; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; color: white; user-select: none; }
+        .overlay {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            text-align: center; pointer-events: auto; background: rgba(15, 23, 42, 0.95);
+            padding: 2.5rem; border: 2px solid #6366f1; border-radius: 1.5rem;
+            box-shadow: 0 0 50px rgba(99, 102, 241, 0.4); display: none; width: 90%; max-width: 500px;
+        }
+        #start-screen { display: block; }
+        .btn {
+            background: linear-gradient(135deg, #4f46e5, #7c3aed); color: white;
+            padding: 1rem 2.5rem; border-radius: 9999px; cursor: pointer; border: none;
+            font-size: 1.5rem; font-weight: 800; transition: all 0.3s; margin-top: 1rem;
+            box-shadow: 0 4px 20px rgba(79, 70, 229, 0.5); text-transform: uppercase; letter-spacing: 2px; width: 100%;
+        }
+        .btn:hover { transform: scale(1.05) translateY(-3px); filter: brightness(1.1); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        #hud { display: flex; justify-content: space-between; padding: 1.5rem 2.5rem; }
+        .status-group { display: flex; flex-direction: column; gap: 12px; }
+        .bar-bg { width: 240px; height: 14px; background: rgba(15, 23, 42, 0.8); border-radius: 7px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.2); position: relative; }
+        .bar-fill { height: 100%; transition: width 0.3s cubic-bezier(0.17, 0.67, 0.83, 0.67); }
+        #health-fill { background: linear-gradient(90deg, #ef4444, #f87171); }
+        #ammo-fill { background: linear-gradient(90deg, #10b981, #34d399); }
+        
+        /* 排行榜樣式 */
+        .leaderboard-container { background: rgba(0,0,0,0.3); border-radius: 0.75rem; margin: 1.5rem 0; max-height: 200px; overflow-y: auto; text-align: left; border: 1px solid rgba(99, 102, 241, 0.2); }
+        .leaderboard-row { display: flex; justify-content: space-between; padding: 0.6rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.9rem; }
+        input { width: 100%; padding: 0.8rem; background: #0f172a; border: 1px solid #6366f1; border-radius: 0.75rem; color: white; margin: 1rem 0; outline: none; text-align: center; font-size: 1.1rem; }
+        .error-msg { color: #f87171; font-size: 0.8rem; margin-top: 0.5rem; display: none; text-align: left; padding: 0.5rem; background: rgba(248, 113, 113, 0.1); border-radius: 0.5rem; }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui-layer">
+        <div id="hud">
+            <div class="status-group">
+                <div class="bar-container">
+                    <div class="text-[0.75rem] font-semibold mb-1 opacity-80 uppercase tracking-widest">護盾能級 (SHIELD)</div>
+                    <div class="bar-bg"><div id="health-fill" class="bar-fill" style="width: 100%"></div></div>
+                </div>
+                <div class="bar-container">
+                    <div class="text-[0.75rem] font-semibold mb-1 opacity-80 uppercase tracking-widest">彈藥存量 (AMMO: <span id="ammo-count">50</span>)</div>
+                    <div id="ammo-bar-bg" class="bar-bg"><div id="ammo-fill" class="bar-fill" style="width: 100%"></div></div>
+                </div>
+            </div>
+            <div class="text-right">
+                <div class="text-4xl font-black italic text-indigo-400 drop-shadow-lg">SCORE: <span id="score">0</span></div>
+                <div class="text-sm font-bold tracking-widest text-indigo-200 opacity-70 mt-1 uppercase">Wave <span id="wave">1</span> Active</div>
+            </div>
+        </div>
+
+        <!-- 開始畫面：加入排行榜展示 -->
+        <div id="start-screen" class="overlay">
+            <h1 class="text-5xl font-black mb-1 italic text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400">STAR HUNTER</h1>
+            <p class="text-indigo-200/40 text-[10px] mb-4 tracking-[0.3em]">TOP PILOTS LEADERBOARD</p>
+            
+            <div id="leaderboard-list" class="leaderboard-container">
+                <div class="p-4 text-center text-gray-500 text-xs">正在載入排行榜資料...</div>
+            </div>
+
+            <button id="start-btn" class="btn" onclick="startGame()">載入中...</button>
+        </div>
+
+        <!-- 遊戲結束畫面：加入成績上傳 -->
+        <div id="game-over-screen" class="overlay">
+            <h2 class="text-5xl font-black mb-4 text-red-500 italic">PILOT TERMINATED</h2>
+            
+            <div id="upload-section">
+                <p class="text-gray-400 text-sm mb-1 uppercase">最終戰績: <span id="final-score" class="text-white font-bold">0</span></p>
+                <input type="text" id="player-name" placeholder="輸入你的代號" maxlength="10">
+                <button id="submit-btn" class="btn" onclick="submitScore()">上傳並重啟</button>
+                <div id="debug-error" class="error-msg"></div>
+                <button class="mt-4 text-xs text-gray-500 underline pointer-events-auto" onclick="startGame()">不存檔直接重啟</button>
+            </div>
+
+            <div id="success-section" class="hidden py-4">
+                <p class="text-emerald-400 font-bold mb-4">數據同步完成！</p>
+                <button class="btn" onclick="resetToHome()">返回主選單</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+/**
+ * 圖片資源管理 (完全保留你的原始連結)
+ */
+const assets = {
+    player: new Image(),
+    enemy1: new Image(),
+    enemy2: new Image(),
+    enemy3: new Image()
+};
+
+assets.player.src = 'https://gcs.rimg.com.tw/g1/d/6e/2d/21945823622701_357.jpg';
+assets.enemy1.src = 'https://cdn.pixabay.com/photo/2022/10/26/18/30/monster-7549210_1280.png';
+assets.enemy2.src = 'https://png.pngtree.com/png-clipart/20241121/original/pngtree-vector-monster-png-image_17273124.png';
+assets.enemy3.src = 'https://p2.bahamut.com.tw/HOME/creationCover/02/0003740902_B.PNG';
+
+let assetsLoaded = 0;
+const totalAssets = Object.keys(assets).length;
+function checkAssets() {
+    assetsLoaded++;
+    if (assetsLoaded === totalAssets) {
+        document.getElementById('start-btn').innerText = '啟動戰機';
+    }
+}
+Object.values(assets).forEach(img => {
+    img.onload = checkAssets;
+    img.onerror = checkAssets;
+});
+
+// --- 排行榜通訊邏輯 (僅加入需要的) ---
+const API_GET = 'get_leaderboard.php';
+const API_SAVE = 'save_score.php';
+
+async function fetchLeaderboard() {
+    try {
+        const response = await fetch(API_GET);
+        const data = await response.json();
+        const listEl = document.getElementById('leaderboard-list');
+        if (data.status === 'error') throw new Error(data.message);
+        listEl.innerHTML = data.map((item, index) => `
+            <div class="leaderboard-row">
+                <span>${index + 1}. ${item.player_name}</span>
+                <span class="text-indigo-400 font-bold">${parseInt(item.score).toLocaleString()}</span>
+            </div>
+        `).join('') || '<div class="p-4 text-center text-gray-500">尚無戰績</div>';
+    } catch (e) {
+        document.getElementById('leaderboard-list').innerHTML = `<div class="p-4 text-red-400 text-[10px]">排行榜載入失敗 (請確認 PHP 與資料庫)</div>`;
+    }
+}
+
+async function submitScore() {
+    const name = document.getElementById('player-name').value.trim();
+    const btn = document.getElementById('submit-btn');
+    const errEl = document.getElementById('debug-error');
+    if (!name) { errEl.innerText = "❌ 請輸入代號"; errEl.style.display = 'block'; return; }
+    
+    btn.disabled = true; btn.innerText = "上傳中..."; errEl.style.display = 'none';
+
+    try {
+        const response = await fetch(API_SAVE, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, score, wave })
+        });
+        const result = await response.json();
+        if (result.status === 'success') {
+            document.getElementById('upload-section').classList.add('hidden');
+            document.getElementById('success-section').classList.remove('hidden');
+            fetchLeaderboard();
+        } else { throw new Error(result.message); }
+    } catch (e) {
+        errEl.innerText = "❌ 上傳失敗: " + e.message;
+        errEl.style.display = 'block';
+        btn.disabled = false; btn.innerText = "重新上傳";
+    }
+}
+
+function resetToHome() {
+    document.getElementById('game-over-screen').style.display = 'none';
+    document.getElementById('start-screen').style.display = 'block';
+    document.getElementById('upload-section').classList.remove('hidden');
+    document.getElementById('success-section').classList.add('hidden');
+    fetchLeaderboard();
+}
+
+// ----------------------------------------------------
+// 遊戲邏輯部分 (完全保留你原始的 Player, Enemy 類別與物理)
+// ----------------------------------------------------
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const elements = {
+    score: document.getElementById('score'),
+    finalScore: document.getElementById('final-score'),
+    wave: document.getElementById('wave'),
+    hpFill: document.getElementById('health-fill'),
+    ammoFill: document.getElementById('ammo-fill'),
+    ammoCount: document.getElementById('ammo-count'),
+    ammoBar: document.getElementById('ammo-bar-bg'),
+    start: document.getElementById('start-screen'),
+    gameOver: document.getElementById('game-over-screen')
+};
+
+let width, height, player, enemies, bullets, enemyBullets, particles;
+let score = 0, wave = 1, frameCount = 0, gameActive = false;
+let keys = {};
+
+function resize() {
+    width = window.innerWidth; height = window.innerHeight;
+    canvas.width = width; canvas.height = height;
+}
+window.addEventListener('resize', resize);
+resize();
+
+class Player {
+    constructor() { this.reset(); }
+    reset() {
+        this.x = 150; this.y = height / 2;
+        this.speed = 8; this.hp = 100; this.maxAmmo = 50; this.ammo = 50;
+        this.fireCooldown = 8; this.lastFire = 0; this.size = 60;
+    }
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        const fireSize = 10 + Math.random() * 10;
+        const grad = ctx.createRadialGradient(-20, 0, 0, -20, 0, fireSize);
+        grad.addColorStop(0, '#fff'); grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(-20, 0, fireSize, 0, Math.PI*2); ctx.fill();
+
+        if (assets.player.complete && assets.player.naturalWidth !== 0) {
+            ctx.drawImage(assets.player, -this.size/2, -this.size/2, this.size, this.size);
+        } else {
+            ctx.fillStyle = '#60a5fa'; ctx.beginPath();
+            ctx.moveTo(20, 0); ctx.lineTo(-20, -15); ctx.lineTo(-20, 15); ctx.closePath(); ctx.fill();
+        }
+        ctx.restore();
+    }
+    update() {
+        if (keys['ArrowUp'] || keys['KeyW']) this.y -= this.speed;
+        if (keys['ArrowDown'] || keys['KeyS']) this.y += this.speed;
+        if (keys['ArrowLeft'] || keys['A']) this.x -= this.speed;
+        if (keys['ArrowRight'] || keys['D']) this.x += this.speed;
+        this.x = Math.max(50, Math.min(width - 50, this.x));
+        this.y = Math.max(50, Math.min(height - 50, this.y));
+        if (keys['Space'] && frameCount - this.lastFire > this.fireCooldown) {
+            this.shoot(); this.lastFire = frameCount;
+        }
+    }
+    shoot() {
+        if (this.ammo <= 0) return;
+        this.ammo--; updateHUD();
+        bullets.push(new Bullet(this.x + 30, this.y, 16, 0, '#60a5fa'));
+    }
+    takeDamage(amt) {
+        this.hp -= amt; updateHUD();
+        createExplosion(this.x, this.y, '#ffffff', 10);
+        if (this.hp <= 0) endGame();
+    }
+    refill() { this.ammo = this.maxAmmo; updateHUD(); }
+}
+
+class Enemy {
+    constructor(type) {
+        this.type = type; this.x = width + 100;
+        this.y = Math.random() * (height - 150) + 75;
+        this.maxHp = type === 3 ? 12 : (type === 2 ? 1 : 4);
+        this.hp = this.maxHp;
+        this.speed = type === 2 ? 7.5 : (type === 3 ? 1.5 : 3.5);
+        this.size = type === 3 ? 100 : 50;
+        this.shootTimer = frameCount + Math.random() * 100;
+    }
+    update() {
+        this.x -= this.speed;
+        if (this.type === 3) this.y += Math.sin(frameCount / 40) * 1.5;
+        if (this.type !== 2 && frameCount - this.shootTimer > 180) {
+            enemyBullets.push(new Bullet(this.x - 30, this.y, -6, 0, '#f87171', 3));
+            this.shootTimer = frameCount;
+        }
+    }
+    draw() {
+        ctx.save(); ctx.translate(this.x, this.y);
+        let img = this.type === 3 ? assets.enemy3 : (this.type === 2 ? assets.enemy2 : assets.enemy1);
+        if (img.complete && img.naturalWidth !== 0) {
+            ctx.scale(-1, 1); ctx.drawImage(img, -this.size/2, -this.size/2, this.size, this.size);
+        } else {
+            ctx.fillStyle = '#ef4444'; ctx.fillRect(-this.size/2, -this.size/2, this.size, this.size);
+        }
+        ctx.restore();
+        const bW = this.size;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(this.x - bW/2, this.y - this.size*0.7, bW, 5);
+        ctx.fillStyle = this.hp > this.maxHp/2 ? '#22c55e' : '#ef4444';
+        ctx.fillRect(this.x - bW/2, this.y - this.size*0.7, bW * (this.hp/this.maxHp), 5);
+    }
+}
+
+class Bullet {
+    constructor(x, y, vx, vy, color, size = 4) { this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.color = color; this.size = size; }
+    draw() {
+        ctx.shadowBlur = 10; ctx.shadowColor = this.color; ctx.fillStyle = this.color;
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
+    }
+    update() { this.x += this.vx; this.y += this.vy; }
+}
+
+class Particle {
+    constructor(x, y, color) {
+        this.x = x; this.y = y; const a = Math.random() * Math.PI*2, f = Math.random()*5+2;
+        this.vx = Math.cos(a)*f; this.vy = Math.sin(a)*f; this.life = 1.0; this.decay = Math.random()*0.03+0.02; this.color = color;
+    }
+    update() { this.x += this.vx; this.y += this.vy; this.life -= this.decay; }
+    draw() { ctx.globalAlpha = this.life; ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x, this.y, 2, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1; }
+}
+
+function createExplosion(x, y, color, count) { for (let i = 0; i < count; i++) particles.push(new Particle(x, y, color)); }
+
+function updateHUD() {
+    elements.score.innerText = score.toLocaleString(); elements.wave.innerText = wave;
+    elements.hpFill.style.width = Math.max(0, player.hp) + '%';
+    elements.ammoFill.style.width = (player.ammo / player.maxAmmo * 100) + '%';
+    elements.ammoCount.innerText = player.ammo;
+    if (player.ammo <= 10) elements.ammoBar.classList.add('ammo-critical'); else elements.ammoBar.classList.remove('ammo-critical');
+}
+
+function startGame() {
+    if (assetsLoaded < totalAssets) return;
+    gameActive = true; score = 0; wave = 1; frameCount = 0;
+    enemies = []; bullets = []; enemyBullets = []; particles = [];
+    player = new Player();
+    elements.start.style.display = 'none'; elements.gameOver.style.display = 'none';
+    updateHUD(); gameLoop();
+}
+
+function endGame() {
+    gameActive = false;
+    elements.finalScore.innerText = score.toLocaleString();
+    elements.gameOver.style.display = 'block';
+}
+
+function gameLoop() {
+    if (!gameActive) return;
+    ctx.fillStyle = 'rgba(2, 6, 23, 0.4)'; ctx.fillRect(0, 0, width, height);
+    player.update(); player.draw();
+    if (frameCount % Math.max(25, 90 - wave*5) === 0) enemies.push(new Enemy(Math.random() > 0.9 ? 3 : (Math.random() > 0.7 ? 2 : 1)));
+    if (frameCount > 0 && frameCount % 1000 === 0) { wave++; player.refill(); }
+    
+    bullets.forEach((b, i) => {
+        b.update(); b.draw(); if (b.x > width + 50) bullets.splice(i, 1);
+        enemies.forEach((e, ei) => {
+            if (Math.hypot(b.x - e.x, b.y - e.y) < e.size/2) {
+                e.hp--; bullets.splice(i, 1); createExplosion(b.x, b.y, '#60a5fa', 4);
+                if (e.hp <= 0) { score += e.type * 250; createExplosion(e.x, e.y, '#facc15', 20); enemies.splice(ei, 1); updateHUD(); }
+            }
+        });
+    });
+
+    enemyBullets.forEach((eb, i) => {
+        eb.update(); eb.draw(); if (eb.x < -50) enemyBullets.splice(i, 1);
+        if (Math.hypot(eb.x - player.x, eb.y - player.y) < 25) { player.takeDamage(10); enemyBullets.splice(i, 1); }
+    });
+
+    enemies.forEach((e, i) => {
+        e.update(); e.draw(); if (e.x < -100) enemies.splice(i, 1);
+        if (Math.hypot(e.x - player.x, e.y - player.y) < e.size/2 + 20) { player.takeDamage(20); enemies.splice(i, 1); }
+    });
+
+    particles.forEach((p, i) => { p.update(); p.draw(); if (p.life <= 0) particles.splice(i, 1); });
+    frameCount++; requestAnimationFrame(gameLoop);
+}
+
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+// 觸控支援 (保留原始邏輯)
+canvas.addEventListener('touchstart', e => { if (!gameActive) return; keys['Space'] = true; player.y = e.touches[0].clientY; }, { passive: false });
+canvas.addEventListener('touchmove', e => { if (!gameActive) return; player.y = e.touches[0].clientY; e.preventDefault(); }, { passive: false });
+canvas.addEventListener('touchend', () => keys['Space'] = false);
+
+// 初始化載入排行榜
+window.onload = () => { fetchLeaderboard(); };
+</script>
+</body>
+</html>
